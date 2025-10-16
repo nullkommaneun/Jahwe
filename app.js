@@ -35,22 +35,28 @@ async function handleFile(file) {
             try {
                 const epubData = event.target.result;
                 const zip = await JSZip.loadAsync(epubData);
-                const contentFiles = Object.keys(zip.files).filter(name => name.endsWith('.xhtml'));
+                // Filtere Inhaltsverzeichnis und Titelseiten heraus
+                const contentFiles = Object.keys(zip.files)
+                    .filter(name => name.endsWith('.xhtml') && name.startsWith('OEBPS/'));
+                
                 let htmlContents = [];
                 for (const filename of contentFiles) {
                     statusEl.textContent = `Lese Inhalt: ${filename}...`;
                     const content = await zip.files[filename].async('string');
                     htmlContents.push({ name: filename, content: content });
                 }
+
                 if (htmlContents.length === 0) {
-                    throw new Error("Keine XHTML-Inhaltsdateien in der EPUB gefunden.");
+                    throw new Error("Keine XHTML-Inhaltsdateien im OEBPS-Ordner gefunden.");
                 }
+
                 statusEl.textContent = 'Inhalt extrahiert. Starte das Parsen der Verse...';
-                // Sortiere die Dateien alphabetisch, um die korrekte Reihenfolge der Bücher sicherzustellen
-                htmlContents.sort((a, b) => a.name.localeCompare(b.name));
+                // Sortiere die Dateien, um die korrekte Reihenfolge der Bücher sicherzustellen
+                htmlContents.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+
                 const verses = parseEpubHtml(htmlContents);
                 if (verses.length === 0) {
-                    throw new Error("Parser hat keine Verse gefunden. Die HTML-Struktur der EPUB hat sich möglicherweise geändert.");
+                    throw new Error("Parser hat keine Verse gefunden. Die HTML-Struktur der EPUB hat sich möglicherweise geändert oder die Selektoren sind falsch.");
                 }
                 parsedDataCache = verses; 
                 displayDataAsHtml(verses);
@@ -69,8 +75,8 @@ async function handleFile(file) {
 }
 
 /**
- * FINALER, MASSGESCHNEIDERTER PARSER (Version 4)
- * Basiert auf der exakten Analyse der 'bi12_X.epub'-Datei.
+ * FINALER, KORRIGIERTER PARSER (Version 5)
+ * Basiert auf der exakten Analyse der 'bi12_X.epub'-Datei und ignoriert Meta-Dateien.
  */
 function parseEpubHtml(htmlFiles) {
     const verses = [];
@@ -78,6 +84,11 @@ function parseEpubHtml(htmlFiles) {
     let currentChapter = 0;
 
     for (const file of htmlFiles) {
+        // Überspringe bekannte Inhaltsverzeichnis-Dateien
+        if (file.name.includes("toc.xhtml")) {
+            continue;
+        }
+
         const parser = new DOMParser();
         const doc = parser.parseFromString(file.content, "text/html");
 
@@ -96,23 +107,31 @@ function parseEpubHtml(htmlFiles) {
             }
         }
         
+        // Wenn kein explizites Kapitel gefunden wurde (z.B. bei Büchern mit nur einem Kapitel), setze es auf 1
+        if (currentBook && currentChapter === 0) {
+            currentChapter = 1;
+        }
+
         // MUSTER 3: Finde alle Verse. Verse sind <p>-Tags mit einer ID, die mit "v" beginnt.
         const verseElements = doc.querySelectorAll('p[id^="v"]');
         for (const p of verseElements) {
-            // Der eigentliche Text ist in einem <span>-Tag mit der Klasse 'verse-text'
-            const verseTextElement = p.querySelector('span.verse-text');
             const verseNumberElement = p.querySelector('a.verse-number');
+            const verseTextSpans = p.querySelectorAll('span.verse-text');
             
-            if (verseTextElement && verseNumberElement) {
+            let verseText = "";
+            verseTextSpans.forEach(span => {
+                verseText += span.textContent;
+            });
+
+            if (verseNumberElement) {
                 const verseNum = parseInt(verseNumberElement.textContent.trim(), 10);
-                const verseText = verseTextElement.textContent.trim();
 
                 if (currentBook && currentChapter > 0 && !isNaN(verseNum) && verseText) {
                     verses.push({
                         book: currentBook,
                         chapter: currentChapter,
                         verse: verseNum,
-                        text: verseText
+                        text: verseText.trim()
                     });
                 }
             }
@@ -120,6 +139,7 @@ function parseEpubHtml(htmlFiles) {
     }
     return verses;
 }
+
 
 function displayDataAsHtml(verses) {
     const bibleData = verses.reduce((acc, verse) => {
@@ -135,7 +155,7 @@ function displayDataAsHtml(verses) {
         const bookSummary = document.createElement('summary');
         bookSummary.textContent = bookName;
         bookDetails.appendChild(bookSummary);
-        const chapterKeys = Object.keys(bibleData[bookName]).sort((a, b) => a - b);
+        const chapterKeys = Object.keys(bibleData[bookName]).sort((a, b) => parseInt(a) - parseInt(b));
         for (const chapterNum of chapterKeys) {
             const chapterDetails = document.createElement('details');
             const chapterSummary = document.createElement('summary');
@@ -169,4 +189,3 @@ function copyResults() {
         displayError(err);
     });
 }
- 
