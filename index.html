@@ -1,3 +1,9 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bibel Studien-Tool (Mit Diagnose-Modul)</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 900px; margin: auto; padding: 20px; line-height: 1.6; background-color: #f9f9f9; }
         h1 { color: #333; }
@@ -6,7 +12,6 @@
         #status { margin-top: 20px; font-style: italic; color: #555; }
         button { font-size: 1em; padding: 10px 15px; cursor: pointer; }
 
-        /* --- NEUE STILE FÜR DIE STRUKTURIERTE ANSICHT --- */
         #results {
             background-color: #fff;
             border: 1px solid #ddd;
@@ -15,31 +20,43 @@
             max-height: 70vh;
             overflow-y: scroll;
         }
-        details {
-            margin-bottom: 5px;
-            border-left: 2px solid #eee;
-            padding-left: 15px;
-        }
-        summary {
-            cursor: pointer;
-            font-weight: bold;
-            padding: 5px;
-            margin-left: -15px;
-        }
-        summary:hover {
-            background-color: #f0f0f0;
-        }
-        ul {
-            list-style-type: none;
-            padding-left: 10px;
-        }
-        li {
-            padding: 8px 0;
-            border-bottom: 1px solid #f2f2f2;
-        }
-        li strong {
-            display: inline-block;
-            min-width: 25px;
-            color: #0056b3;
+        details { margin-bottom: 5px; border-left: 2px solid #eee; padding-left: 15px; }
+        summary { cursor: pointer; font-weight: bold; padding: 5px; margin-left: -15px; }
+        summary:hover { background-color: #f0f0f0; }
+        ul { list-style-type: none; padding-left: 10px; }
+        li { padding: 8px 0; border-bottom: 1px solid #f2f2f2; }
+        li strong { display: inline-block; min-width: 25px; color: #0056b3; }
+
+        /* --- NEU: STIL FÜR DEN FEHLER-CONTAINER --- */
+        #error-container {
+            display: none; /* Standardmäßig unsichtbar */
+            background-color: #ffdddd;
+            border: 2px solid #d8000c;
+            color: #d8000c;
+            padding: 15px;
+            margin-top: 20px;
+            white-space: pre-wrap; /* Wichtig für die Formatierung der Fehlermeldung */
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
         }
     </style>
+</head>
+<body>
+    <h1>Bibel Studien-Tool</h1>
+    <p>Dieses Tool läuft vollständig in deinem Browser. Deine Dateien werden nirgendwo hochgeladen.</p>
+
+    <input type="file" id="pdfFile" accept=".pdf" style="display: none;">
+    <div id="dropzone">Klicke hier, um eine Bibel-PDF auszuwählen, oder ziehe sie per Drag & Drop hierher.</div>
+
+    <p id="status">Warte auf eine PDF-Datei...</p>
+
+    <div id="error-container"></div>
+    
+    <button id="copyButton" style="display:none;" onclick="copyResults()">JSON kopieren</button>
+    
+    <div id="results">Hier werden die extrahierten Verse angezeigt...</div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.10.377/pdf.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
