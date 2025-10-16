@@ -17,7 +17,7 @@ dropzone.addEventListener('dragleave', () => dropzone.classList.remove('hover'))
 dropzone.addEventListener('drop', (e) => { e.preventDefault(); dropzone.classList.remove('hover'); handleFile(e.dataTransfer.files[0]); });
 
 /**
- * KOMPLETT NEUE HAUPTFUNKTION ZUR VERARBEITUNG VON EPUB-DATEIEN
+ * HAUPTFUNKTION ZUR VERARBEITUNG VON EPUB-DATEIEN
  */
 async function handleFile(file) {
     if (!file || !file.name.endsWith('.epub')) {
@@ -29,99 +29,85 @@ async function handleFile(file) {
         resultsEl.innerHTML = '';
         errorContainer.style.display = 'none';
         copyButton.style.display = 'none';
-
         const fileReader = new FileReader();
         fileReader.readAsArrayBuffer(file);
-
         fileReader.onload = async function(event) {
             try {
                 const epubData = event.target.result;
                 const zip = await JSZip.loadAsync(epubData);
+                const contentFiles = Object.keys(zip.files).filter(name => name.endsWith('.xhtml'));
                 let htmlContents = [];
-
-                // Finde alle HTML/XHTML-Dateien im EPUB
-                const contentFiles = Object.keys(zip.files).filter(name => name.endsWith('.xhtml') || name.endsWith('.html'));
-                
                 for (const filename of contentFiles) {
                     statusEl.textContent = `Lese Inhalt: ${filename}...`;
                     const content = await zip.files[filename].async('string');
-                    htmlContents.push(content);
+                    htmlContents.push({ name: filename, content: content });
                 }
-
                 if (htmlContents.length === 0) {
-                    throw new Error("Keine Inhaltsdateien (XHTML/HTML) in der EPUB gefunden.");
+                    throw new Error("Keine XHTML-Inhaltsdateien in der EPUB gefunden.");
                 }
-
                 statusEl.textContent = 'Inhalt extrahiert. Starte das Parsen der Verse...';
-                const verses = parseEpubHtml(htmlContents.join(' '));
-                
+                // Sortiere die Dateien alphabetisch, um die korrekte Reihenfolge der Bücher sicherzustellen
+                htmlContents.sort((a, b) => a.name.localeCompare(b.name));
+                const verses = parseEpubHtml(htmlContents);
                 if (verses.length === 0) {
-                    throw new Error("Parser hat keine Verse gefunden. Die HTML-Struktur der EPUB ist möglicherweise unerwartet.");
+                    throw new Error("Parser hat keine Verse gefunden. Die HTML-Struktur der EPUB hat sich möglicherweise geändert.");
                 }
-
                 parsedDataCache = verses; 
                 displayDataAsHtml(verses);
-
                 statusEl.textContent = `Erfolg! ${verses.length} Verse wurden gefunden.`;
                 copyButton.style.display = 'inline-block';
-
             } catch (innerError) {
                 displayError(innerError);
             }
         };
-
         fileReader.onerror = function() {
             throw new Error("Kritischer Fehler: Die EPUB-Datei konnte nicht gelesen werden.");
         };
-
     } catch (outerError) {
         displayError(outerError);
     }
 }
 
 /**
- * NEUER PARSER, DER HTML-STRUKTUREN ANSTELLE VON TEXTMUSTERN VERWENDET
+ * FINALER, MASSGESCHNEIDERTER PARSER (Version 4)
+ * Basiert auf der exakten Analyse der 'bi12_X.epub'-Datei.
  */
-function parseEpubHtml(htmlString) {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(htmlString, "text/html");
-    
+function parseEpubHtml(htmlFiles) {
     const verses = [];
     let currentBook = "";
     let currentChapter = 0;
 
-    // Annahme: Die Bibel-EPUB verwendet semantische Elemente. Wir suchen nach allen relevanten Elementen.
-    // Diese Selektoren müssen eventuell an die spezifische EPUB-Struktur angepasst werden.
-    const elements = doc.querySelectorAll('h1, h2, h3, p');
+    for (const file of htmlFiles) {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(file.content, "text/html");
 
-    for (const el of elements) {
-        const text = el.textContent.trim();
-        
-        // Annahme: Buchtitel sind in <h1> oder <h2> Tags
-        if ((el.tagName === 'H1' || el.tagName === 'H2') && isNaN(parseInt(text))) {
-            currentBook = text;
-            currentChapter = 0; // Setze das Kapitel zurück, wenn ein neues Buch beginnt
-            continue;
+        // MUSTER 1: Finde den Buchtitel. Er ist im <h1>-Tag innerhalb eines <header>-Elements.
+        const bookTitleElement = doc.querySelector('header h1');
+        if (bookTitleElement) {
+            currentBook = bookTitleElement.textContent.trim();
         }
 
-        // Annahme: Kapitel sind in <h3> oder als alleinstehende Zahl in <p>
-        if (el.tagName === 'H3' || (el.tagName === 'P' && /^\d+$/.test(text))) {
-            const chapterNum = parseInt(text);
+        // MUSTER 2: Finde die Kapitelnummer. Sie ist in einem <a>-Tag mit der ID "chapter".
+        const chapterElement = doc.querySelector('a#chapter');
+        if (chapterElement) {
+            const chapterNum = parseInt(chapterElement.textContent.trim(), 10);
             if (!isNaN(chapterNum)) {
                 currentChapter = chapterNum;
-                continue;
             }
         }
+        
+        // MUSTER 3: Finde alle Verse. Verse sind <p>-Tags mit einer ID, die mit "v" beginnt.
+        const verseElements = doc.querySelectorAll('p[id^="v"]');
+        for (const p of verseElements) {
+            // Der eigentliche Text ist in einem <span>-Tag mit der Klasse 'verse-text'
+            const verseTextElement = p.querySelector('span.verse-text');
+            const verseNumberElement = p.querySelector('a.verse-number');
+            
+            if (verseTextElement && verseNumberElement) {
+                const verseNum = parseInt(verseNumberElement.textContent.trim(), 10);
+                const verseText = verseTextElement.textContent.trim();
 
-        // Annahme: Verse sind in <p>-Tags mit einer Versnummer am Anfang.
-        if (el.tagName === 'P' && currentBook && currentChapter > 0) {
-            // Finde eine Versnummer (oft in <sup> oder <strong>) und den Text danach
-            const verseNumberMatch = text.match(/^(\d+)\s*/);
-            if (verseNumberMatch) {
-                const verseNum = parseInt(verseNumberMatch[1]);
-                const verseText = text.substring(verseNumberMatch[0].length).trim();
-                
-                if(verseText) {
+                if (currentBook && currentChapter > 0 && !isNaN(verseNum) && verseText) {
                     verses.push({
                         book: currentBook,
                         chapter: currentChapter,
@@ -134,7 +120,6 @@ function parseEpubHtml(htmlString) {
     }
     return verses;
 }
-
 
 function displayDataAsHtml(verses) {
     const bibleData = verses.reduce((acc, verse) => {
