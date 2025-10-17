@@ -1,23 +1,19 @@
-// Globale Variable, um die geparsten Daten zu speichern
-let parsedDataCache = [];
+// Globale Variablen, um den Zustand der App zu speichern
+let EPUB_FILES_CACHE = [];
+let PARSED_DATA_CACHE = [];
 
-// Elemente aus der HTML-Seite holen
+// UI-Elemente holen
 const fileInput = document.getElementById('epubFile');
-const dropzone = document.getElementById('dropzone');
 const statusEl = document.getElementById('status');
-const resultsEl = document.getElementById('results');
-const copyButton = document.getElementById('copyButton');
 const errorContainer = document.getElementById('error-container');
+const rawHtmlView = document.getElementById('raw-html-view');
+const resultsEl = document.getElementById('results');
 
-// Event-Listener für Interaktionen
-dropzone.addEventListener('click', () => fileInput.click());
+// Event-Listener für den Datei-Upload
 fileInput.addEventListener('change', (e) => handleFile(e.target.files[0]));
-dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('hover'); });
-dropzone.addEventListener('dragleave', () => dropzone.classList.remove('hover'));
-dropzone.addEventListener('drop', (e) => { e.preventDefault(); dropzone.classList.remove('hover'); handleFile(e.dataTransfer.files[0]); });
 
 /**
- * HAUPTFUNKTION ZUR VERARBEITUNG VON EPUB-DATEIEN
+ * Lädt, entpackt und speichert die EPUB-Dateien im Cache.
  */
 async function handleFile(file) {
     if (!file || !file.name.endsWith('.epub')) {
@@ -26,112 +22,101 @@ async function handleFile(file) {
     }
     try {
         statusEl.textContent = 'Lade und entpacke EPUB...';
-        resultsEl.innerHTML = '';
         errorContainer.style.display = 'none';
-        copyButton.style.display = 'none';
-        const fileReader = new FileReader();
-        fileReader.readAsArrayBuffer(file);
-        fileReader.onload = async function(event) {
-            try {
-                const epubData = event.target.result;
-                const zip = await JSZip.loadAsync(epubData);
-                const contentFiles = Object.keys(zip.files)
-                    .filter(name => name.endsWith('.xhtml') && name.startsWith('OEBPS/'));
-                
-                let htmlContents = [];
-                for (const filename of contentFiles) {
-                    const content = await zip.files[filename].async('string');
-                    htmlContents.push({ name: filename, content: content });
-                }
+        EPUB_FILES_CACHE = []; // Cache leeren
 
-                if (htmlContents.length === 0) {
-                    throw new Error("Keine XHTML-Inhaltsdateien im OEBPS-Ordner gefunden.");
-                }
+        const zip = await JSZip.loadAsync(file);
+        const contentFiles = Object.keys(zip.files).filter(name => name.endsWith('.xhtml') && name.startsWith('OEBPS/'));
+        contentFiles.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 
-                statusEl.textContent = 'Inhalt extrahiert. Starte das Parsen der Verse...';
-                htmlContents.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+        for (const filename of contentFiles) {
+            const content = await zip.files[filename].async('string');
+            EPUB_FILES_CACHE.push({ name: filename, content: content });
+        }
 
-                const verses = parseEpubHtml(htmlContents);
-                if (verses.length === 0) {
-                    throw new Error("Parser hat keine Verse gefunden. Die HTML-Struktur der EPUB hat sich möglicherweise geändert oder die Selektoren sind falsch.");
-                }
-                parsedDataCache = verses; 
-                displayDataAsHtml(verses);
-                statusEl.textContent = `Erfolg! ${verses.length} Verse wurden gefunden.`;
-                copyButton.style.display = 'inline-block';
-            } catch (innerError) {
-                displayError(innerError);
-            }
-        };
-        fileReader.onerror = function() {
-            throw new Error("Kritischer Fehler: Die EPUB-Datei konnte nicht gelesen werden.");
-        };
-    } catch (outerError) {
-        displayError(outerError);
+        if (EPUB_FILES_CACHE.length === 0) {
+            throw new Error("Keine XHTML-Inhaltsdateien im OEBPS-Ordner gefunden.");
+        }
+
+        statusEl.textContent = `EPUB geladen! ${EPUB_FILES_CACHE.length} Inhaltsdateien gefunden.`;
+        // Zeige den HTML-Code der ersten relevanten Datei als Starthilfe an
+        const firstRealContent = EPUB_FILES_CACHE.find(f => !f.name.includes("toc") && !f.name.includes("Title"));
+        rawHtmlView.textContent = firstRealContent ? firstRealContent.content : "Keine passende Inhaltsdatei für die Vorschau gefunden.";
+
+    } catch (error) {
+        displayError(error);
     }
 }
 
 /**
- * FINALER, CHIRURGISCHER PARSER (Version 6)
- * Basiert auf der exakten Analyse der 'bi12_X.epub'-Struktur.
+ * Wird durch den Button ausgelöst. Führt den Parser mit den aktuellen Selektoren aus.
  */
-function parseEpubHtml(htmlFiles) {
+function runCustomParser() {
+    if (EPUB_FILES_CACHE.length === 0) {
+        alert("Bitte laden Sie zuerst eine EPUB-Datei hoch.");
+        return;
+    }
+
+    try {
+        // 1. Lese die benutzerdefinierten Selektoren aus den Input-Feldern
+        const bookSelector = document.getElementById('book-selector').value;
+        const chapterSelector = document.getElementById('chapter-selector').value;
+        const verseContainerSelector = document.getElementById('verse-container-selector').value;
+        const verseNumberSelector = document.getElementById('verse-number-selector').value;
+        const verseTextSelector = document.getElementById('verse-text-selector').value;
+
+        // 2. Führe den Parser mit diesen Selektoren aus
+        const verses = parseWithCustomSelectors({
+            bookSelector, chapterSelector, verseContainerSelector, verseNumberSelector, verseTextSelector
+        });
+
+        if (verses.length === 0) {
+            resultsEl.innerHTML = "<h2>Keine Verse gefunden!</h2><p>Bitte überprüfen Sie Ihre Selektoren und den Raw-HTML-Code.</p>";
+            return;
+        }
+        
+        PARSED_DATA_CACHE = verses;
+        displayDataAsHtml(verses);
+
+    } catch (error) {
+        displayError(error);
+    }
+}
+
+/**
+ * Der eigentliche Parser, der die benutzerdefinierten Selektoren verwendet.
+ */
+function parseWithCustomSelectors(selectors) {
     const verses = [];
     let currentBook = "";
     let currentChapter = 0;
 
-    for (const file of htmlFiles) {
-        // Überspringe Inhaltsverzeichnis- und andere Meta-Dateien rigoros
-        if (file.name.includes("toc") || file.name.includes("Title") || file.name.includes("Foreword")) {
-            continue;
-        }
+    for (const file of EPUB_FILES_CACHE) {
+        if (file.name.includes("toc") || file.name.includes("Title")) continue;
 
         const parser = new DOMParser();
         const doc = parser.parseFromString(file.content, "text/html");
 
-        // MUSTER 1: Finde den Buchtitel. Er ist im <h1> in einem <header>.
-        const bookTitleElement = doc.querySelector('header h1');
-        if (bookTitleElement) {
-            currentBook = bookTitleElement.textContent.trim();
-        }
+        const bookTitleElement = doc.querySelector(selectors.bookSelector);
+        if (bookTitleElement) currentBook = bookTitleElement.textContent.trim();
 
-        // MUSTER 2: Finde die Kapitelnummer. Sie ist in einem <a>-Tag mit der ID "chapter".
-        const chapterElement = doc.querySelector('a#chapter');
+        const chapterElement = doc.querySelector(selectors.chapterSelector);
         if (chapterElement) {
             const chapterNum = parseInt(chapterElement.textContent.trim(), 10);
-            if (!isNaN(chapterNum)) {
-                currentChapter = chapterNum;
-            }
+            if (!isNaN(chapterNum)) currentChapter = chapterNum;
         }
-        
-        // Fange den Fall ab, dass ein Buch nur ein Kapitel hat (z.B. Judas)
-        if (currentBook && currentChapter === 0) {
-            currentChapter = 1;
-        }
+        if (currentBook && currentChapter === 0) currentChapter = 1;
 
-        // MUSTER 3: Finde alle Verse. Die Struktur ist ein <p> mit einer ID, die mit 'v' beginnt.
-        const verseElements = doc.querySelectorAll('p[id^="v"]');
-        for (const p of verseElements) {
-            // Die Versnummer ist in einem <a>-Tag mit der Klasse 'verse-number'.
-            const verseNumberElement = p.querySelector('a.verse-number');
-            // Der Text ist in einem oder mehreren <span>-Tags mit der Klasse 'verse-text'.
-            const verseTextSpans = p.querySelectorAll('span.verse-text');
+        const verseContainers = doc.querySelectorAll(selectors.verseContainerSelector);
+        for (const container of verseContainers) {
+            const verseNumberElement = container.querySelector(selectors.verseNumberSelector);
+            const verseTextElement = container.querySelector(selectors.verseTextSelector);
             
-            let verseText = "";
-            verseTextSpans.forEach(span => {
-                verseText += span.textContent;
-            });
-
-            if (verseNumberElement && verseText) {
+            if (verseNumberElement && verseTextElement) {
                 const verseNum = parseInt(verseNumberElement.textContent.trim(), 10);
-
-                if (currentBook && currentChapter > 0 && !isNaN(verseNum)) {
-                    verses.push({
-                        book: currentBook,
-                        chapter: currentChapter,
-                        verse: verseNum,
-                        text: verseText.trim()
-                    });
+                const verseText = verseTextElement.textContent.trim();
+                if (currentBook && currentChapter > 0 && !isNaN(verseNum) && verseText) {
+                    verses.push({ book: currentBook, chapter: currentChapter, verse: verseNum, text: verseText });
                 }
             }
         }
@@ -139,7 +124,11 @@ function parseEpubHtml(htmlFiles) {
     return verses;
 }
 
+/**
+ * Zeigt die geparsten Daten in der Ergebnis-Ansicht an.
+ */
 function displayDataAsHtml(verses) {
+    // Diese Funktion bleibt dieselbe wie zuvor, um die Daten schön anzuzeigen.
     const bibleData = verses.reduce((acc, verse) => {
         const { book, chapter, text, verse: verseNum } = verse;
         if (!acc[book]) acc[book] = {};
@@ -174,16 +163,6 @@ function displayDataAsHtml(verses) {
 }
 
 function displayError(error) {
-    statusEl.textContent = 'Ein Fehler ist aufgetreten! Details siehe unten.';
     errorContainer.style.display = 'block';
-    errorContainer.textContent = `--- FEHLERBERICHT ---\nFehlertyp: ${error.name}\nMeldung: ${error.message}\n\n--- Technische Details (Stack Trace) ---\n${error.stack}`;
-}
-
-function copyResults() {
-    if (parsedDataCache.length === 0) return;
-    navigator.clipboard.writeText(JSON.stringify(parsedDataCache, null, 2)).then(() => {
-        alert("Die originalen JSON-Rohdaten wurden in die Zwischenablage kopiert!");
-    }).catch(err => {
-        displayError(err);
-    });
+    errorContainer.textContent = `FEHLER: ${error.message}`;
 }
