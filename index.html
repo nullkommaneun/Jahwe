@@ -3,38 +3,62 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bibel Studien-Tool (EPUB Edition)</title>
+    <title>Interaktiver EPUB Bibel-Parser</title>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 900px; margin: auto; padding: 20px; line-height: 1.6; background-color: #f9f9f9; }
-        h1 { color: #333; }
-        #dropzone { border: 2px dashed #ccc; padding: 30px; text-align: center; cursor: pointer; background-color: #fff; }
-        #dropzone.hover { border-color: #333; background-color: #f0f0f0; }
-        #status { margin-top: 20px; font-style: italic; color: #555; }
-        button { font-size: 1em; padding: 10px 15px; cursor: pointer; }
-        #results { background-color: #fff; border: 1px solid #ddd; padding: 15px; margin-top: 10px; max-height: 70vh; overflow-y: scroll; }
-        details { margin-bottom: 5px; border-left: 2px solid #eee; padding-left: 15px; }
-        summary { cursor: pointer; font-weight: bold; padding: 5px; margin-left: -15px; }
-        summary:hover { background-color: #f0f0f0; }
-        ul { list-style-type: none; padding-left: 10px; }
-        li { padding: 8px 0; border-bottom: 1px solid #f2f2f2; }
-        li strong { display: inline-block; min-width: 25px; color: #0056b3; }
-        #error-container { display: none; background-color: #ffdddd; border: 2px solid #d8000c; color: #d8000c; padding: 15px; margin-top: 20px; white-space: pre-wrap; font-family: 'Courier New', monospace; font-size: 0.9em; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; display: flex; flex-direction: column; height: 100vh; margin: 0; background-color: #f4f4f9; }
+        header { background-color: #4a4a4a; color: white; padding: 15px; text-align: center; }
+        main { display: flex; flex: 1; overflow: hidden; }
+        #controls { width: 400px; padding: 15px; background-color: #fff; overflow-y: auto; border-right: 1px solid #ddd; }
+        #viewer { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+        .view-panel { flex: 1; padding: 15px; overflow-y: auto; background-color: #fdfdfd; }
+        #raw-html-view { font-family: 'Courier New', monospace; font-size: 0.8em; white-space: pre-wrap; word-wrap: break-word; border-bottom: 1px solid #ddd; }
+        h1, h2, h3 { margin-top: 0; }
+        label { display: block; margin-top: 15px; font-weight: bold; }
+        input[type="text"] { width: 100%; padding: 8px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px; }
+        button { width: 100%; padding: 12px; margin-top: 20px; border: none; border-radius: 4px; background-color: #007bff; color: white; font-size: 1.1em; cursor: pointer; }
+        button:hover { background-color: #0056b3; }
+        #status { margin-top: 15px; font-style: italic; color: #555; }
+        #error-container { display: none; background-color: #ffdddd; border: 1px solid #d8000c; color: #d8000c; padding: 10px; margin-top: 15px; white-space: pre-wrap; font-size: 0.8em; }
     </style>
 </head>
 <body>
-    <h1>Bibel Studien-Tool (EPUB Edition)</h1>
-    <p>Dieses Tool liest die strukturierteren EPUB-Dateien für eine höhere Genauigkeit.</p>
+    <header><h1>Interaktiver EPUB Bibel-Parser</h1></header>
+    <main>
+        <div id="controls">
+            <h2>1. EPUB hochladen</h2>
+            <input type="file" id="epubFile" accept=".epub">
+            <p id="status">Warte auf eine EPUB-Datei...</p>
+            <div id="error-container"></div>
+            
+            <hr style="margin: 20px 0;">
 
-    <input type="file" id="epubFile" accept=".epub" style="display: none;">
-    <div id="dropzone">Klicke hier, um eine Bibel-EPUB auszuwählen, oder ziehe sie per Drag & Drop hierher.</div>
+            <h2>2. Selektoren anpassen</h2>
+            <p>Verwenden Sie CSS-Selektoren, um die Elemente zu finden. Schauen Sie sich den Raw-HTML-Code rechts an, um die richtigen Tags und Klassen zu finden.</p>
+            
+            <label for="book-selector">Buch-Titel</label>
+            <input type="text" id="book-selector" value="header h1">
+            
+            <label for="chapter-selector">Kapitel-Nummer</label>
+            <input type="text" id="chapter-selector" value="a#chapter">
 
-    <p id="status">Warte auf eine EPUB-Datei...</p>
-    <div id="error-container"></div>
-    <button id="copyButton" style="display:none;" onclick="copyResults()">JSON kopieren</button>
-    <div id="results">Hier werden die extrahierten Verse angezeigt...</div>
+            <label for="verse-container-selector">Vers-Container (der <p>-Tag)</label>
+            <input type="text" id="verse-container-selector" value='p[id^="v"]'>
+
+            <label for="verse-number-selector">Vers-Nummer (im Container)</label>
+            <input type="text" id="verse-number-selector" value="a.verse-number">
+
+            <label for="verse-text-selector">Vers-Text (im Container)</label>
+            <input type="text" id="verse-text-selector" value="span.verse-text">
+
+            <button onclick="runCustomParser()">Parser testen & Ergebnisse anzeigen</button>
+        </div>
+        <div id="viewer">
+            <div class="view-panel" id="raw-html-view"><h2>Raw HTML-Ansicht</h2><p>Nach dem Upload sehen Sie hier den HTML-Code der ersten Inhaltsdatei des EPUBs.</p></div>
+            <div class="view-panel" id="results"><h2>Geparste Ergebnisse</h2><p>Nach dem Testen der Selektoren sehen Sie hier das Ergebnis.</p></div>
+        </div>
+    </main>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
-    
     <script src="app.js"></script>
 </body>
 </html>
