@@ -35,13 +35,11 @@ async function handleFile(file) {
             try {
                 const epubData = event.target.result;
                 const zip = await JSZip.loadAsync(epubData);
-                // Filtere Inhaltsverzeichnis und Titelseiten heraus
                 const contentFiles = Object.keys(zip.files)
                     .filter(name => name.endsWith('.xhtml') && name.startsWith('OEBPS/'));
                 
                 let htmlContents = [];
                 for (const filename of contentFiles) {
-                    statusEl.textContent = `Lese Inhalt: ${filename}...`;
                     const content = await zip.files[filename].async('string');
                     htmlContents.push({ name: filename, content: content });
                 }
@@ -51,7 +49,6 @@ async function handleFile(file) {
                 }
 
                 statusEl.textContent = 'Inhalt extrahiert. Starte das Parsen der Verse...';
-                // Sortiere die Dateien, um die korrekte Reihenfolge der Bücher sicherzustellen
                 htmlContents.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
 
                 const verses = parseEpubHtml(htmlContents);
@@ -75,8 +72,8 @@ async function handleFile(file) {
 }
 
 /**
- * FINALER, KORRIGIERTER PARSER (Version 5)
- * Basiert auf der exakten Analyse der 'bi12_X.epub'-Datei und ignoriert Meta-Dateien.
+ * FINALER, CHIRURGISCHER PARSER (Version 6)
+ * Basiert auf der exakten Analyse der 'bi12_X.epub'-Struktur.
  */
 function parseEpubHtml(htmlFiles) {
     const verses = [];
@@ -84,15 +81,15 @@ function parseEpubHtml(htmlFiles) {
     let currentChapter = 0;
 
     for (const file of htmlFiles) {
-        // Überspringe bekannte Inhaltsverzeichnis-Dateien
-        if (file.name.includes("toc.xhtml")) {
+        // Überspringe Inhaltsverzeichnis- und andere Meta-Dateien rigoros
+        if (file.name.includes("toc") || file.name.includes("Title") || file.name.includes("Foreword")) {
             continue;
         }
 
         const parser = new DOMParser();
         const doc = parser.parseFromString(file.content, "text/html");
 
-        // MUSTER 1: Finde den Buchtitel. Er ist im <h1>-Tag innerhalb eines <header>-Elements.
+        // MUSTER 1: Finde den Buchtitel. Er ist im <h1> in einem <header>.
         const bookTitleElement = doc.querySelector('header h1');
         if (bookTitleElement) {
             currentBook = bookTitleElement.textContent.trim();
@@ -107,15 +104,17 @@ function parseEpubHtml(htmlFiles) {
             }
         }
         
-        // Wenn kein explizites Kapitel gefunden wurde (z.B. bei Büchern mit nur einem Kapitel), setze es auf 1
+        // Fange den Fall ab, dass ein Buch nur ein Kapitel hat (z.B. Judas)
         if (currentBook && currentChapter === 0) {
             currentChapter = 1;
         }
 
-        // MUSTER 3: Finde alle Verse. Verse sind <p>-Tags mit einer ID, die mit "v" beginnt.
+        // MUSTER 3: Finde alle Verse. Die Struktur ist ein <p> mit einer ID, die mit 'v' beginnt.
         const verseElements = doc.querySelectorAll('p[id^="v"]');
         for (const p of verseElements) {
+            // Die Versnummer ist in einem <a>-Tag mit der Klasse 'verse-number'.
             const verseNumberElement = p.querySelector('a.verse-number');
+            // Der Text ist in einem oder mehreren <span>-Tags mit der Klasse 'verse-text'.
             const verseTextSpans = p.querySelectorAll('span.verse-text');
             
             let verseText = "";
@@ -123,10 +122,10 @@ function parseEpubHtml(htmlFiles) {
                 verseText += span.textContent;
             });
 
-            if (verseNumberElement) {
+            if (verseNumberElement && verseText) {
                 const verseNum = parseInt(verseNumberElement.textContent.trim(), 10);
 
-                if (currentBook && currentChapter > 0 && !isNaN(verseNum) && verseText) {
+                if (currentBook && currentChapter > 0 && !isNaN(verseNum)) {
                     verses.push({
                         book: currentBook,
                         chapter: currentChapter,
@@ -139,7 +138,6 @@ function parseEpubHtml(htmlFiles) {
     }
     return verses;
 }
-
 
 function displayDataAsHtml(verses) {
     const bibleData = verses.reduce((acc, verse) => {
